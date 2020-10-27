@@ -5,7 +5,7 @@
 * @version      1.0
 * @brief        C 99 portable implementation of the hell's gate technique
 * @details
-* @link         https://github.com/am0nsec/DynamicWrapperEx
+* @link         https://github.com/am0nsec/vxlib
 * @copyright    This project has been released under the GNU Public License v3 license.
 */
 #ifndef __HELLS_GATE_H_GUARD_
