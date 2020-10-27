@@ -10,6 +10,12 @@
 */
 #include <windows.h>
 
+#include "lib/hg.h"
+
 INT wmain() {
-	return 0x00;
+	HRESULT hr = HgInitialise();
+	if (SUCCEEDED(hr))
+		return 0x00;
+	else
+		return 0x01;
 }
