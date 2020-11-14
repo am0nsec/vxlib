@@ -132,6 +132,11 @@ typedef NTSTATUS(STDMETHODCALLTYPE* TNtExtendSection) (
 	_In_ PLARGE_INTEGER NewSectionSize
 );
 
+typedef NTSTATUS(STDMETHODCALLTYPE* TNtUnmapViewOfSection) (
+	_In_ HANDLE SectionHandle,
+	_In_ PVOID  BaseAddress
+);
+
 #pragma endregion
 
 /*-------------------------------------------------------------------------------------------------
@@ -144,6 +149,7 @@ static TNtQueryInformationFile g_NtQueryInformationFile = NULL;
 static TNtMapViewOfSection     g_NtMapViewOfSection = NULL;
 static TNtMakeTemporaryObject  g_NtMakeTemporaryObject = NULL;
 static TNtExtendSection        g_NtExtendSection = NULL;
+static TNtUnmapViewOfSection   g_NtUnmapViewOfSection = NULL;
 #pragma endregion
 
 /*-------------------------------------------------------------------------------------------------
@@ -369,12 +375,39 @@ HRESULT HgInitialise(
 	LOAD_AND_CHECK(hNtdllModule, g_NtMapViewOfSection, "NtMapViewOfSection");
 	LOAD_AND_CHECK(hNtdllModule, g_NtMakeTemporaryObject, "NtMakeTemporaryObject");
 	LOAD_AND_CHECK(hNtdllModule, g_NtExtendSection, "NtExtendSection");
+	LOAD_AND_CHECK(hNtdllModule, g_NtUnmapViewOfSection, "NtUnmapViewOfSection");
 
 	// Create the section executive object and map the module in memory
 	RETURN_ON_ERROR(HgpMapViewOfModule(pHgData));
 
 	// Get the Import Address Table
 	RETURN_ON_ERROR(HgpGetExportAddressTable(pHgData));
+	return S_OK;
+}
+
+/**
+ * @brief Uninitialise the Hell's Gate project by unmaping all the sections and closing all the handles.
+ * @param pHgData Pointer to a HgData structure.
+ * @param bHgSection Whether the Hell's Gate Section has to be unmaped too.
+ * @return Whether the function successfully executed.
+*/
+_Success_(return == S_OK) _Must_inspect_result_
+HRESULT HgUninitialise(
+	_In_ PHG_DATA pHgData,
+	_In_ BOOLEAN  bHgSection
+) {
+	HRESULT nt = S_OK;
+
+	if (pHgData->hExecSection) {
+		nt = g_NtUnmapViewOfSection((HANDLE)-1, pHgData->lpExecSection);
+		CloseHandle(pHgData->hExecSection);
+	}
+	if (bHgSection && pHgData->hHgSection) {
+		nt = g_NtUnmapViewOfSection((HANDLE)-1, pHgData->lpHgSection);
+		CloseHandle(pHgData->hHgSection);
+	}
+
+	RtlZeroMemory(pHgData, sizeof(HG_DATA));
 	return S_OK;
 }
 

