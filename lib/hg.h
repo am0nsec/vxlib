@@ -1,9 +1,9 @@
 /**
 * @file         hg.h
-* @date         27-10-2020
+* @date         14-11-2020
 * @author       Paul Laine (@am0nsec)
 * @version      1.0
-* @brief        C 99 portable implementation of the hell's gate technique
+* @brief        C 99 portable implementation of the hell's gate technique.
 * @details
 * @link         https://github.com/am0nsec/vxlib
 * @copyright    This project has been released under the GNU Public License v3 license.
@@ -23,9 +23,14 @@
 #define NTDLL_MODULE_PATH L"\\??\\C:\\Windows\\System32\\ntdll.dll"
 #define NTDLL_MODULE_NAME "ntdll"
 
-// For making the code 
-#define RETURN_ON_ERROR(hr) if (FAILED(hr)) {return hr;}
-#define LOAD_AND_CHECK(h, lp, name) lp = GetProcAddress(h, name); if (lp == NULL){ return E_FAIL; }
+// For making the code less bloated 
+#define RETURN_ON_ERROR(hr) \
+	if (FAILED(hr)) {return hr;}
+
+// Get the address of a function at runtime
+#define LOAD_AND_CHECK(h, lp, name) \
+	lp = (LPVOID)GetProcAddress(h, name); \
+	if (lp == NULL){ return E_FAIL; }
 #pragma endregion
 
 /*-------------------------------------------------------------------------------------------------
@@ -45,6 +50,26 @@ typedef enum _SECTION_INHERIT {
 	ViewUnmap = 2
 } SECTION_INHERIT, * PSECTION_INHERIT;
 
+/**
+ * @brief Data required by HG to works. 
+*/
+typedef struct _HG_DATA {
+	// Section used for NTDLL
+	HANDLE hHgSection;
+	LPVOID lpHgSection;
+	
+	// EAT information
+	DWORD  dwNumberOfNames;
+	PDWORD pdwAddressOfFunctions;
+	PDWORD pdwAddressOfNames;
+	PWORD  pwAddressOfNameOrdinales;
+
+	// Section used for executable function
+	HANDLE hExecSection;
+	LPVOID lpExecSection;
+	DWORD  dwExecSection;
+	WORD   wFunctionCopied;
+} HG_DATA, *PHG_DATA;
 
 /**
  * @brief Type definition of the NtCreateSection native function.
@@ -101,6 +126,12 @@ typedef NTSTATUS(STDMETHODCALLTYPE* TNtMapViewOfSection)(
 typedef NTSTATUS(STDMETHODCALLTYPE* TNtMakeTemporaryObject) (
 	_In_ HANDLE ObjectHandle
 );
+
+typedef NTSTATUS(STDMETHODCALLTYPE* TNtExtendSection) (
+	_In_ HANDLE         SectionHandle,
+	_In_ PLARGE_INTEGER NewSectionSize
+);
+
 #pragma endregion
 
 /*-------------------------------------------------------------------------------------------------
@@ -112,11 +143,7 @@ static TNtOpenFile             g_NtOpenFile = NULL;
 static TNtQueryInformationFile g_NtQueryInformationFile = NULL;
 static TNtMapViewOfSection     g_NtMapViewOfSection = NULL;
 static TNtMakeTemporaryObject  g_NtMakeTemporaryObject = NULL;
-
-static HANDLE                  g_hProcessHeap = INVALID_HANDLE_VALUE;
-static HANDLE                  g_hSectionHandle = INVALID_HANDLE_VALUE;
-static LPVOID                  g_lpSectionAddress = NULL;
-
+static TNtExtendSection        g_NtExtendSection = NULL;
 #pragma endregion
 
 /*-------------------------------------------------------------------------------------------------
@@ -133,14 +160,14 @@ VOID HgpInitUnicodeString(
 	_In_ PCWSTR          pSource
 ) {
 	if (pSource) {
-		pDestination->Length = wcslen(pSource) * sizeof(WCHAR);
+		pDestination->Length = (USHORT)(wcslen(pSource) * sizeof(WCHAR));
 		pDestination->MaximumLength = pDestination->Length + sizeof(UNICODE_NULL);
 	}
 	else {
 		pDestination->Length = 0;
 		pDestination->MaximumLength = 0;
 	}
-	pDestination->Buffer = pSource;
+	pDestination->Buffer = (PWSTR)pSource;
 }
 
 /**
@@ -173,14 +200,12 @@ HRESULT HgpGetFileSize(
 
 /**
  * @brief Map a fresh copy of the NTDLL module in memory.
- * @param phSectionHandle Pointer to an handle to a section executive object.
- * @param pSectionAddress Pointer to the base address of the section executive object.
+ * @param pHgData Pointer to an HgData structure.
  * @return Whether the function successfully executed.
 */
 _Success_(return == S_OK) _Must_inspect_result_
 HRESULT HgpMapViewOfModule(
-	_Out_ PHANDLE phSectionHandle,
-	_Out_ LPVOID* ppSectionAddress
+	_In_  PHG_DATA pHgData
 ) {
 	// Initialise variables
 	HANDLE hModuleHandle = INVALID_HANDLE_VALUE;
@@ -201,38 +226,137 @@ HRESULT HgpMapViewOfModule(
 	LARGE_INTEGER FileSize = { 0 };
 	RETURN_ON_ERROR(HgpGetFileSize(&hModuleHandle, &FileSize));
 
-	// Create un-named section executive object
+	// Create 2 un-named section executive object
 	HANDLE hSectionHandle = INVALID_HANDLE_VALUE;
 	nt = g_NtCreateSection(&hSectionHandle, SECTION_ALL_ACCESS, NULL, &FileSize, PAGE_READONLY, SEC_IMAGE, hModuleHandle);
 	if (!NT_SUCCESS(nt) || hSectionHandle == INVALID_HANDLE_VALUE)
 		return E_FAIL;
 	CloseHandle(hModuleHandle);
 
-	// Remove permanent flag from object
+	HANDLE hExecSection = INVALID_HANDLE_VALUE;
+	LARGE_INTEGER InitialSize = { 0 };
+	InitialSize.QuadPart = 32;
+	nt = g_NtCreateSection(&hExecSection, SECTION_ALL_ACCESS, NULL, &FileSize, PAGE_EXECUTE_READWRITE, SEC_COMMIT, NULL);
+	if (!NT_SUCCESS(nt) || hSectionHandle == INVALID_HANDLE_VALUE)
+		return E_FAIL;
+
+	// Remove permanent flag from objects
 	nt = g_NtMakeTemporaryObject(hSectionHandle);
 	if (!NT_SUCCESS(nt)) {
 		CloseHandle(hSectionHandle);
 		return E_FAIL;
 	}
 
-	// Map section executive object to process
+	nt = g_NtMakeTemporaryObject(hExecSection);
+	if (!NT_SUCCESS(nt)) {
+		CloseHandle(hExecSection);
+		return E_FAIL;
+	}
+
+	// Map section executive objects to process
 	PVOID pSectionAddress = NULL;
 	SIZE_T ulViewSize = 0;
-	nt = g_NtMapViewOfSection(hSectionHandle, (HANDLE)-1, &pSectionAddress, NULL, NULL,	NULL, &ulViewSize, ViewUnmap, 0, PAGE_READWRITE);
+	nt = g_NtMapViewOfSection(hSectionHandle, (HANDLE)-1, &pSectionAddress, 0, 0, NULL, &ulViewSize, ViewUnmap, 0, PAGE_READWRITE);
 	if (!NT_SUCCESS(nt))
 		return E_FAIL;
 
-	*phSectionHandle = hSectionHandle;
-	*ppSectionAddress = pSectionAddress;
+	PVOID pExecSectionAddress = NULL;
+	ulViewSize = 32;
+	nt = g_NtMapViewOfSection(hExecSection, (HANDLE)-1, &pExecSectionAddress, 0, 0, NULL, &ulViewSize, ViewUnmap, 0, PAGE_EXECUTE_READWRITE);
+
+	// Save the data and exit;
+	pHgData->hHgSection = hSectionHandle;
+	pHgData->lpHgSection = pSectionAddress;
+	pHgData->hExecSection = hExecSection;
+	pHgData->lpExecSection = pExecSectionAddress;
+	pHgData->dwExecSection = ulViewSize;
+	return S_OK;
+}
+
+/**
+ * @brief Get the address of the functions and function name list from the section.
+ * @param pHgData Pointer to an HgData structure.
+ * @return Whether the function successfully executed.
+*/
+_Success_(return == S_OK) _Must_inspect_result_
+HRESULT HgpGetExportAddressTable(
+	_In_ PHG_DATA pHgData
+) {
+	if (pHgData == NULL)
+		return E_INVALIDARG;
+
+	// Check DOS Header
+	PIMAGE_DOS_HEADER pImageDosHeader = pHgData->lpHgSection;
+	if (pImageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+		return E_FAIL;
+
+	// Check NT Header
+	PIMAGE_NT_HEADERS pImageNtHeaders = (PIMAGE_NT_HEADERS)((PBYTE)pImageDosHeader + pImageDosHeader->e_lfanew);
+	if (pImageNtHeaders->Signature != IMAGE_NT_SIGNATURE)
+		return E_FAIL;
+
+	// Get the address of the EAT
+	DWORD64 dwExportDirectoryRva = pImageNtHeaders->OptionalHeader.DataDirectory[0].VirtualAddress;
+	PIMAGE_EXPORT_DIRECTORY pImageExportDirectory = (PIMAGE_EXPORT_DIRECTORY)((PBYTE)pImageDosHeader + dwExportDirectoryRva);
+
+	// Get address of name, functions and ordinals	
+	pHgData->dwNumberOfNames = pImageExportDirectory->NumberOfNames;
+	pHgData->pdwAddressOfFunctions = (PDWORD)((PBYTE)pImageDosHeader + pImageExportDirectory->AddressOfFunctions);
+	pHgData->pdwAddressOfNames = (PDWORD)((PBYTE)pImageDosHeader + pImageExportDirectory->AddressOfNames);
+	pHgData->pwAddressOfNameOrdinales = (PWORD)((PBYTE)pImageDosHeader + pImageExportDirectory->AddressOfNameOrdinals);
+	return S_OK;
+}
+
+/**
+ * @brief Get the DJB2 hash of a function name.
+ * @param pbFunctionName The name of the function.
+ * @param pdwHash Pointer to the hash value.
+*/
+VOID HgpGetHash(
+	_In_  PBYTE  pbFunctionName,
+	_Out_ PDWORD pdwHash
+) {
+	BYTE c = 0;
+	*pdwHash = 0x77347734;
+	while (c = *pbFunctionName++)
+		*pdwHash = ((*pdwHash << 0x5) + *pdwHash) + c;
+}
+
+/**
+ * @brief Clone the fast system call stub of a function
+ * @param pHgData Pointer to a HgData structure.
+ * @return Whether the function successfully executed.
+*/
+_Success_(return == S_OK) _Must_inspect_result_
+HRESULT HgpCloneNativeFunction(
+	_In_ PHG_DATA pHgData,
+	_In_ LPVOID   lpFunctionAddress
+) {
+	// Resize the section to store a new function
+	if (pHgData->dwExecSection <= (pHgData->wFunctionCopied * 32)) {
+		LARGE_INTEGER NewSize = { 0 };
+		NewSize.QuadPart = pHgData->dwExecSection + 0x1000;
+		NTSTATUS nt = g_NtExtendSection(pHgData->hExecSection, &NewSize);
+		if (NT_ERROR(nt))
+			return E_FAIL;
+	}
+
+	// Copy the fast call stub
+	PBYTE dst = (PBYTE)pHgData->lpExecSection + (pHgData->wFunctionCopied++ * 32);
+	for (WORD cx = 0; cx < 32; cx++)
+		*dst++ = *((PBYTE)lpFunctionAddress)++;
 	return S_OK;
 }
 
 /**
  * @brief Initialise the Hell's Gate project by mapping a fresh copy of NTDLL module into the process.
+ * @param pHgData Pointer to a HgData structure.
  * @return Whether the function successfully executed.
 */
 _Success_(return == S_OK) _Must_inspect_result_
-HRESULT HgInitialise() {
+HRESULT HgInitialise(
+	_In_ PHG_DATA pHgData
+) {
 	// Resolve native APIs
 	HMODULE hNtdllModule = GetModuleHandleA(NTDLL_MODULE_NAME);
 	if (hNtdllModule == NULL)
@@ -244,19 +368,50 @@ HRESULT HgInitialise() {
 	LOAD_AND_CHECK(hNtdllModule, g_NtQueryInformationFile, "NtQueryInformationFile");
 	LOAD_AND_CHECK(hNtdllModule, g_NtMapViewOfSection, "NtMapViewOfSection");
 	LOAD_AND_CHECK(hNtdllModule, g_NtMakeTemporaryObject, "NtMakeTemporaryObject");
-
-	// Get handle to process heap
-	g_hProcessHeap = GetProcessHeap();
+	LOAD_AND_CHECK(hNtdllModule, g_NtExtendSection, "NtExtendSection");
 
 	// Create the section executive object and map the module in memory
-	HRESULT hr = HgpMapViewOfModule(&g_hSectionHandle, &g_lpSectionAddress);
-	if (FAILED(hr) || g_hSectionHandle == INVALID_HANDLE_VALUE || g_lpSectionAddress == NULL)
-		return E_FAIL;
+	RETURN_ON_ERROR(HgpMapViewOfModule(pHgData));
 
 	// Get the Import Address Table
-	// TODO
-
+	RETURN_ON_ERROR(HgpGetExportAddressTable(pHgData));
 	return S_OK;
+}
+
+/**
+ * @brief Find and clone a function based on function name hash.
+ * @param pHgData Pointer to a HgData structure 
+ * @param pdwHash Pointer to the 32-bit DJB2 hash of the function name.
+ * @param ppFunction Pointer to a function pointer.
+ * @return Whether the function successfully executed.
+*/
+_Success_(return == S_OK) _Must_inspect_result_
+HRESULT HgGetFunction(
+	_In_  PHG_DATA pHgData,
+	_In_  PDWORD   pdwHash,
+	_Out_ LPVOID*  ppFunction
+) {
+	if (pdwHash == NULL)
+		return E_FAIL;
+
+	// Find the function
+	for (DWORD cx = 0; cx < pHgData->dwNumberOfNames; cx++) {
+		LPCSTR cszFunctionName = ((PBYTE)pHgData->lpHgSection + pHgData->pdwAddressOfNames[cx]);
+
+		// Get hash of the function;
+		DWORD dwHash = 0;
+		HgpGetHash((PBYTE)cszFunctionName, &dwHash);
+		if (dwHash != *pdwHash)
+			continue;
+
+		// Get address of the function
+		*ppFunction = (PBYTE)pHgData->lpHgSection + pHgData->pdwAddressOfFunctions[pHgData->pwAddressOfNameOrdinales[cx]];
+		if (*ppFunction == NULL)
+			return E_FAIL;
+
+		return HgpCloneNativeFunction(pHgData, *ppFunction);
+	}
+	return E_FAIL;
 }
 
 #pragma endregion
