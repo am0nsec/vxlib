@@ -9,93 +9,45 @@
 * @copyright    This project has been released under the GNU Public License v3 license.
 */
 #include <windows.h>
+#include <stdio.h>
 
 #include "lib/hg.h"
-
-
-
-typedef NTSTATUS(STDMETHODCALLTYPE* TNtAllocateVirtualMemory) (
-	HANDLE    ProcessHandle,
-	PVOID*    BaseAddress,
-	ULONG_PTR ZeroBits,
-	PSIZE_T   RegionSize,
-	ULONG     AllocationType,
-	ULONG     Protect
-);
-
-// NtCreateThreadEx
-typedef NTSTATUS(STDMETHODCALLTYPE* TNtCreateThreadEx)(
-	OUT PHANDLE hThread,
-	IN  ACCESS_MASK DesiredAccess,
-	IN  PVOID ObjectAttributes,
-	IN  HANDLE ProcessHandle,
-	IN  PVOID lpStartAddress,
-	IN  PVOID lpParameter,
-	IN  ULONG Flags,
-	IN  SIZE_T StackZeroBits,
-	IN  SIZE_T SizeOfStackCommit,
-	IN  SIZE_T SizeOfStackReserve,
-	OUT PVOID lpBytesBuffer
-);
-
-typedef NTSTATUS(STDMETHODCALLTYPE* TNtWaitForSingleObject)(
-	IN HANDLE               ObjectHandle,
-	IN BOOLEAN              Alertable,
-	IN PLARGE_INTEGER       TimeOut OPTIONAL
-);
-
-PVOID VxMoveMemory(PVOID dest, const PVOID src, SIZE_T len) {
-	char* d = dest;
-	const char* s = src;
-	if (d < s)
-		while (len--)
-			*d++ = *s++;
-	else {
-		char* lasts = s + (len - 1);
-		char* lastd = d + (len - 1);
-		while (len--)
-			*lastd-- = *lasts--;
-	}
-	return dest;
-}
+#include "lib/aes.h"
 
 INT wmain() {
+	CNG_DATA CngData = { 0 };
+	HRESULT hr = CngInitialise(&CngData);
+	
+	// Prologue
+	LPSTR szBuffer1 = "cum lux abest, tenebrae vincunt";
+	LPSTR szBuffer2 = "instrumentum regni";
+	printf("String 1 to encrypt: %s\n", szBuffer1);
+	printf("String 2 to encrypt: %s\n\n", szBuffer2);
+	DWORD dwBuffer1 = strlen(szBuffer1);
+	DWORD dwBuffer2 = strlen(szBuffer2);
 
-	HG_DATA HgData = { 0 };
-	HRESULT hr = HgInitialise(&HgData);
-
-	// Resolve all functions
-	TNtAllocateVirtualMemory NtAllocateVirtualMemory = NULL;
-	DWORD dwHash = 0x80a6b89b;
-	HgGetFunction(&HgData, &dwHash, (LPVOID)&NtAllocateVirtualMemory);
-
-	TNtCreateThreadEx NtCreateThreadEx = NULL;
-	dwHash = 0x88c5015f;
-	HgGetFunction(&HgData, &dwHash, (LPVOID)&NtCreateThreadEx);
-
-	TNtWaitForSingleObject NtWaitForSingleObject = NULL;
-	dwHash = 0x4e551bcb;
-	HgGetFunction(&HgData, &dwHash, (LPVOID)&NtWaitForSingleObject);
+	// Encrypt stuff
+	PBYTE pbEncBuffer1 = NULL;
+	PBYTE pbEncBuffer2 = NULL;
+	DWORD dwEncBuffer1 = 0;
+	DWORD dwEncBuffer2 = 0;
+	hr = CngEncryptString(&CngData, szBuffer1, &dwBuffer1, &pbEncBuffer1, &dwEncBuffer1);
+	hr = CngEncryptString(&CngData, szBuffer2, &dwBuffer2, &pbEncBuffer2, &dwEncBuffer2);
 
 
-	HgUninitialise(&HgData, TRUE);
+	// Decrypt stuff
+	LPSTR szDecBuffer1 = NULL;
+	LPSTR szDecBuffer2 = NULL;
+	DWORD dwDecBuffer1 = 0;
+	DWORD dwDecBuffer2 = 0;
+	hr = CngDecryptString(&CngData, pbEncBuffer1, &dwEncBuffer1, &szDecBuffer1, &dwDecBuffer1);
+	hr = CngDecryptString(&CngData, pbEncBuffer2, &dwEncBuffer2, &szDecBuffer2, &dwDecBuffer2);
 
-	// Execute shellcode
-	PVOID lpBaseAddress = NULL;
-	SIZE_T sDataSize = 0x1000;
-	NTSTATUS nt = NtAllocateVirtualMemory((HANDLE)-1, &lpBaseAddress, 0, &sDataSize, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+	// Print output 
+	printf("String 1 decrypted:  %s\n", szDecBuffer1);
+	printf("String 2 decrypted:  %s\n", szDecBuffer2);
 
-	char shellcode[] = "\x90\x90\x90\x90\xcc\xcc\xcc\xcc\xc3";
-	VxMoveMemory(lpBaseAddress, shellcode, sizeof(shellcode));
-
-	// Create thread
-	HANDLE hHostThread = INVALID_HANDLE_VALUE;
-	nt = NtCreateThreadEx(&hHostThread, 0x1FFFFF, NULL, (HANDLE)-1, (LPTHREAD_START_ROUTINE)lpBaseAddress, NULL, FALSE, NULL, NULL, NULL, NULL);
-
-	// Wait for 1 seconds
-	LARGE_INTEGER Timeout;
-	Timeout.QuadPart = 0x10000;
-	nt = NtWaitForSingleObject(hHostThread, FALSE, &Timeout);
-
+	// Release everything
+	hr = CngUninitialise(&CngData);
 	return 1;
 }
