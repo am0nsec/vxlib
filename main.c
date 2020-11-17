@@ -23,8 +23,8 @@ INT wmain() {
 	LPSTR szBuffer2 = "instrumentum regni";
 	printf("String 1 to encrypt: %s\n", szBuffer1);
 	printf("String 2 to encrypt: %s\n\n", szBuffer2);
-	DWORD dwBuffer1 = strlen(szBuffer1);
-	DWORD dwBuffer2 = strlen(szBuffer2);
+	DWORD dwBuffer1 = (DWORD)strlen(szBuffer1);
+	DWORD dwBuffer2 = (DWORD)strlen(szBuffer2);
 
 	// Encrypt stuff
 	PBYTE pbEncBuffer1 = NULL;

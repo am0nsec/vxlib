@@ -275,7 +275,7 @@ HRESULT HgpMapViewOfModule(
 	pHgData->lpHgSection = pSectionAddress;
 	pHgData->hExecSection = hExecSection;
 	pHgData->lpExecSection = pExecSectionAddress;
-	pHgData->dwExecSection = ulViewSize;
+	pHgData->dwExecSection = (DWORD)ulViewSize;
 	return S_OK;
 }
 
@@ -339,7 +339,7 @@ HRESULT HgpCloneNativeFunction(
 	_In_ LPVOID   lpFunctionAddress
 ) {
 	// Resize the section to store a new function
-	if (pHgData->dwExecSection <= (pHgData->wFunctionCopied * 32)) {
+	if (pHgData->dwExecSection <= (DWORD)(pHgData->wFunctionCopied * 32)) {
 		LARGE_INTEGER NewSize = { 0 };
 		NewSize.QuadPart = pHgData->dwExecSection + 0x1000;
 		NTSTATUS nt = g_NtExtendSection(pHgData->hExecSection, &NewSize);

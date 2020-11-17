@@ -10,4 +10,4 @@ project(VXLib VERSION 1.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_executable(vxlib-test "main.c" "lib/aes.h")
+add_executable(vxlib-test "main.c" "lib/aes.h" "lib/b64.h")

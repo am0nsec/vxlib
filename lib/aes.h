@@ -11,8 +11,6 @@
 #ifndef __CNG_AES_H_GUARD_
 #define __CNG_AES_H_GUARD_
 #include <Windows.h>
-#include <winternl.h>
-#include <wincrypt.h>
 #include <bcrypt.h>
 
 #pragma comment(lib, "Bcrypt.lib")
@@ -25,6 +23,10 @@
 
 #define RETURN_ON_ERROR(hr) \
 	if (FAILED(hr)) {return hr;}
+
+#ifndef NT_ERROR
+#define NT_ERROR(Status) ((((ULONG)(Status)) >> 30) == 3)
+#endif
 
 #define RETURN_ON_NT_ERROR(nt) \
 	if (NT_ERROR(nt)) {return nt;}
@@ -61,7 +63,7 @@ HRESULT CngpGenerateRandom(
 	_In_  PDWORD pdwLength,
 	_Out_ PBYTE* ppData
 ) {
-	if (pdwLength == NULL || ppData == NULL || *ppData)
+	if (pdwLength == NULL || ppData == NULL)
 		return E_INVALIDARG;
 
 	// Open handle to the RNG Algorithm Provider
@@ -77,7 +79,7 @@ HRESULT CngpGenerateRandom(
 	}
 
 	// Close handle
-	BCryptCloseAlgorithmProvider(hAlgorithm, NULL);
+	BCryptCloseAlgorithmProvider(hAlgorithm, 0);
 	return S_OK;
 }
 
