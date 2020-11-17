@@ -1,6 +1,6 @@
 /**
 * @file         aes.h
-* @date         14-11-2020
+* @date         17-11-2020
 * @author       Paul Laine (@am0nsec)
 * @version      1.0
 * @brief        C 99 portable implementation Windows CNG AES Encryption.
