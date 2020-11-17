@@ -11,7 +11,6 @@
 #include <windows.h>
 #include <stdio.h>
 
-#include "lib/hg.h"
 #include "lib/aes.h"
 
 INT wmain() {
@@ -20,11 +19,11 @@ INT wmain() {
 	
 	// Prologue
 	LPSTR szBuffer1 = "cum lux abest, tenebrae vincunt";
-	LPSTR szBuffer2 = "instrumentum regni";
+	LPWSTR szBuffer2 = L"instrumentum regni";
 	printf("String 1 to encrypt: %s\n", szBuffer1);
-	printf("String 2 to encrypt: %s\n\n", szBuffer2);
+	wprintf(L"String 2 to encrypt: %s\n\n", szBuffer2);
 	DWORD dwBuffer1 = (DWORD)strlen(szBuffer1);
-	DWORD dwBuffer2 = (DWORD)strlen(szBuffer2);
+	DWORD dwBuffer2 = (DWORD)wcslen(szBuffer2) * sizeof(WCHAR);
 
 	// Encrypt stuff
 	PBYTE pbEncBuffer1 = NULL;
@@ -37,7 +36,7 @@ INT wmain() {
 
 	// Decrypt stuff
 	LPSTR szDecBuffer1 = NULL;
-	LPSTR szDecBuffer2 = NULL;
+	LPWSTR szDecBuffer2 = NULL;
 	DWORD dwDecBuffer1 = 0;
 	DWORD dwDecBuffer2 = 0;
 	hr = CngDecryptString(&CngData, pbEncBuffer1, &dwEncBuffer1, &szDecBuffer1, &dwDecBuffer1);
@@ -45,7 +44,7 @@ INT wmain() {
 
 	// Print output 
 	printf("String 1 decrypted:  %s\n", szDecBuffer1);
-	printf("String 2 decrypted:  %s\n", szDecBuffer2);
+	wprintf(L"String 2 decrypted:  %s\n\n", szDecBuffer2);
 
 	// Release everything
 	hr = CngUninitialise(&CngData);
